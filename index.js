@@ -1,34 +1,93 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const http = require('http');
+const express = require('express');
 
-// Fix for Render - open a port
-http.createServer((req,res)=>{ res.writeHead(200); res.end('Bot Online - Scan QR in logs'); }).listen(process.env.PORT || 10000, ()=>console.log('HTTP server ready'));
+const app = express();
+const PORT = process.env.PORT || 10000;
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '8677479696:AAFHLHiW9nHufW1127t7ETiAbl-Iw9pthFI';
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '6509466127';
-
-async function sendTelegram(text){
-  try{
-    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(text)}`;
-    await fetch(url);
-  }catch(e){ console.log('Telegram failed, but continuing:', e.message); }
-}
-
-const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: './session' }),
-  puppeteer: { args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--no-zygote'] }
+// Health check for Render + UptimeRobot
+app.get('/', (req, res) => {
+  res.send('Bot Online - Scan QR in logs');
+});
+app.listen(PORT, () => {
+  console.log(`HTTP server ready on port ${PORT}`);
 });
 
-client.on('qr', async (qr) => {
+console.log('Starting WhatsApp client...');
+
+const client = new Client({
+  authStrategy: new LocalAuth({ 
+    dataPath: './session',
+    clientId: 'reminder-bot'
+  }),
+  puppeteer: {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu',
+      '--disable-extensions'
+    ]
+  },
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
+  }
+});
+
+client.on('qr', (qr) => {
   console.log('=== QR CODE - SCAN WITH WHATSAPP ===');
   qrcode.generate(qr, { small: true });
   console.log('QR STRING:', qr);
-  console.log('If QR above not scannable, open this link: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(qr));
-  // try telegram but don't crash
-  await sendTelegram('WA QR: ' + qr);
+  console.log(`If QR above not scannable, open this link: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
 });
 
-client.on('ready', () => console.log('BOT READY!'));
-client.on('authenticated', () => console.log('AUTHENTICATED'));
-client.initialize();
+client.on('authenticated', () => {
+  console.log('AUTHENTICATED - SESSION SAVED');
+});
+
+client.on('auth_failure', (msg) => {
+  console.log('AUTH FAILED:', msg);
+});
+
+client.on('ready', () => {
+  console.log('BOT READY! WHATSAPP CONNECTED - YOU CAN CLOSE QR');
+});
+
+client.on('disconnected', (reason) => {
+  console.log('DISCONNECTED:', reason);
+});
+
+client.on('message', async (msg) => {
+  try {
+    const body = msg.body.toLowerCase().trim();
+    console.log(`Message from ${msg.from}: ${msg.body}`);
+
+    if (body === 'ping') {
+      await msg.reply('Pong! Bot is alive ✅');
+    }
+    
+    // Add your reminder logic here
+    // if (body.startsWith('remind')) { ... }
+
+  } catch (err) {
+    console.log('Message error:', err.message);
+  }
+});
+
+client.initialize().catch(err => {
+  console.log('Initialize error:', err.message);
+});
+
+// Prevent crash
+process.on('unhandledRejection', (err) => {
+  console.log('Unhandled Rejection:', err.message);
+});
+process.on('uncaughtException', (err) => {
+  console.log('Uncaught Exception:', err.message);
+});
