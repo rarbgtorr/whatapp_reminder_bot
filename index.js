@@ -1,36 +1,34 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const http = require('http');
 
-const TELEGRAM_TOKEN = '8677479696:AAFHLHiW9nHufW1127t7ETiAbl-Iw9pthFI';
-const TELEGRAM_CHAT_ID = '6509466127';
+// Fix for Render - open a port
+http.createServer((req,res)=>{ res.writeHead(200); res.end('Bot Online - Scan QR in logs'); }).listen(process.env.PORT || 10000, ()=>console.log('HTTP server ready'));
 
-async function sendTelegram(text) {
-    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
-    await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: text }) });
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '8677479696:AAFHLHiW9nHufW1127t7ETiAbl-Iw9pthFI';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '6509466127';
+
+async function sendTelegram(text){
+  try{
+    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(text)}`;
+    await fetch(url);
+  }catch(e){ console.log('Telegram failed, but continuing:', e.message); }
 }
 
 const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './session' }),
-    puppeteer: { headless: true, args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage'] }
+  authStrategy: new LocalAuth({ dataPath: './session' }),
+  puppeteer: { args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--no-zygote'] }
 });
 
-function parseDelay(t){const l=t.toLowerCase();let m=l.match(/contact after (\d+)\s*min/);if(m)return{delay:parseInt(m[1])*60000,label:`${m[1]} min`};m=l.match(/contact after (\d+)\s*hrs?/);if(m)return{delay:parseInt(m[1])*3600000,label:`${m[1]} hr`};m=l.match(/contact after (\d+)\s*days?/);if(m)return{delay:parseInt(m[1])*86400000,label:`${m[1]} day`};return null;}
-function extractPhone(t){let m=t.match(/\+?\d{10,15}/g);if(!m)return null;let n=m[m.length-1].replace(/[^0-9]/g,'');return n.length>=10?n:null;}
-
-client.on('qr', async qr => { console.log("QR"); qrcode.generate(qr,{small:true}); await sendTelegram(`📱 Scan: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`); });
-client.on('ready', () => { console.log("✅ Ready"); sendTelegram("✅ WA Bot ONLINE on Cloud"); });
-
-client.on('message_create', async msg => {
-    try {
-        const text=msg.body||''; if(!text.toLowerCase().includes('contact'))return; if(text.includes('⏰'))return;
-        const parsed=parseDelay(text); if(!parsed)return;
-        const chatId=msg.fromMe?msg.to:msg.from;
-        let name=chatId; try{const c=await client.getContactById(chatId);name=c.pushname||c.name||name;}catch{}
-        const phone=extractPhone(text);
-        console.log(`SET ${name} -> ${parsed.label}`);
-        await client.sendMessage(chatId,`⏰ Reminder set`).catch(()=>{});
-        setTimeout(async()=>{ let t=phone?`🔔 REMINDER: ${name}\n💬 "${text}"\n⏰ ${parsed.label}\n📱 ${phone}\nhttps://wa.me/${phone}`:`🔔 REMINDER: ${name}\n💬 "${text}"\n⏰ ${parsed.label}`; await sendTelegram(t); }, parsed.delay);
-    } catch(e){console.log(e.message);}
+client.on('qr', async (qr) => {
+  console.log('=== QR CODE - SCAN WITH WHATSAPP ===');
+  qrcode.generate(qr, { small: true });
+  console.log('QR STRING:', qr);
+  console.log('If QR above not scannable, open this link: https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(qr));
+  // try telegram but don't crash
+  await sendTelegram('WA QR: ' + qr);
 });
 
+client.on('ready', () => console.log('BOT READY!'));
+client.on('authenticated', () => console.log('AUTHENTICATED'));
 client.initialize();
